@@ -1,0 +1,42 @@
+import axios from 'axios'
+
+const API = axios.create({
+  baseURL: '/api',
+})
+
+API.interceptors.request.use((config) => {
+  const tokens = JSON.parse(localStorage.getItem('customer_tokens') || '{}')
+  if (tokens.access) {
+    config.headers.Authorization = `Bearer ${tokens.access}`
+  }
+  return config
+})
+
+API.interceptors.response.use(
+  (res) => res,
+  async (err) => {
+    const original = err.config
+    if (err.response?.status === 401 && !original._retry) {
+      original._retry = true
+      const tokens = JSON.parse(localStorage.getItem('customer_tokens') || '{}')
+      if (tokens.refresh) {
+        try {
+          const { data } = await axios.post('/api/customers/token/refresh/', {
+            refresh: tokens.refresh,
+          })
+          const newTokens = { ...tokens, access: data.access }
+          localStorage.setItem('customer_tokens', JSON.stringify(newTokens))
+          original.headers.Authorization = `Bearer ${data.access}`
+          return API(original)
+        } catch {
+          localStorage.removeItem('customer_tokens')
+          localStorage.removeItem('customer_user')
+          window.location.href = '/login'
+        }
+      }
+    }
+    return Promise.reject(err)
+  }
+)
+
+export default API
