@@ -3,13 +3,8 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = os.environ.get(
-    "DJANGO_SECRET_KEY",
-    "django-insecure-order-change-me",
-)
-
+SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "django-insecure-order-change-me")
 DEBUG = os.environ.get("DEBUG", "True").lower() in ("true", "1", "yes")
-
 ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "*").split(",")
 
 INSTALLED_APPS = [
@@ -34,6 +29,7 @@ MIDDLEWARE = [
 ]
 
 ROOT_URLCONF = "order_service.urls"
+WSGI_APPLICATION = "order_service.wsgi.application"
 
 TEMPLATES = [
     {
@@ -50,8 +46,6 @@ TEMPLATES = [
         },
     },
 ]
-
-WSGI_APPLICATION = "order_service.wsgi.application"
 
 DATABASES = {
     "default": {
@@ -74,14 +68,14 @@ REST_FRAMEWORK = {
 
 INTERNAL_API_KEY = os.environ.get("INTERNAL_API_KEY", "internal-secret-key")
 
-USER_SERVICE_URL = os.environ.get("USER_SERVICE_URL", "http://localhost:8001")
-PRODUCT_SERVICE_URL = os.environ.get("PRODUCT_SERVICE_URL", "http://localhost:8002")
-INVENTORY_SERVICE_URL = os.environ.get("INVENTORY_SERVICE_URL", "http://localhost:8004")
+CUSTOMER_SERVICE_URL = os.environ.get("CUSTOMER_SERVICE_URL", "http://localhost:8001")
+LAPTOP_SERVICE_URL = os.environ.get("LAPTOP_SERVICE_URL", "http://localhost:8003")
+CLOTHES_SERVICE_URL = os.environ.get("CLOTHES_SERVICE_URL", "http://localhost:8004")
+CART_SERVICE_URL = os.environ.get("CART_SERVICE_URL", "http://localhost:8005")
 
 LANGUAGE_CODE = "en-us"
 TIME_ZONE = "UTC"
 USE_I18N = True
 USE_TZ = True
-
 STATIC_URL = "static/"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"

@@ -2,45 +2,67 @@ from decimal import Decimal
 
 from django.db import transaction
 
-from .clients import InventoryClient, ProductClient, UserClient
+from .clients import ClothesClient, CustomerClient, LaptopClient
 from .models import Order, OrderItem
 
 
-def create_order(user_id, items, shipping_address):
-    """
-    Orchestrate order creation:
-    1. Validate user exists
-    2. Fetch product info (prices)
-    3. Check stock availability
-    4. Deduct stock
-    5. Create order + items
-    """
-    UserClient.validate_user(user_id)
+def _split_items_by_type(items):
+    laptop_items = [i for i in items if i["product_type"] == "laptop"]
+    clothes_items = [i for i in items if i["product_type"] == "clothes"]
+    return laptop_items, clothes_items
 
-    product_ids = [item["product_id"] for item in items]
-    products = ProductClient.get_products(product_ids)
 
-    missing = [pid for pid in product_ids if str(pid) not in products]
-    if missing:
-        raise ValueError(f"Products not found: {missing}")
+def _get_client_for_type(product_type):
+    if product_type == "laptop":
+        return LaptopClient
+    return ClothesClient
 
-    stock_items = [{"product_id": i["product_id"], "quantity": i["quantity"]} for i in items]
-    stock_result = InventoryClient.check_stock(stock_items)
-    if not stock_result["all_in_stock"]:
-        out_of_stock = [d for d in stock_result["details"] if not d["sufficient"]]
-        raise ValueError(f"Insufficient stock: {out_of_stock}")
 
-    InventoryClient.deduct(stock_items)
+def create_order(customer_id, items, shipping_address):
+    CustomerClient.validate_customer(customer_id)
+
+    laptop_items, clothes_items = _split_items_by_type(items)
+
+    products = {}
+    if laptop_items:
+        laptop_ids = [i["product_id"] for i in laptop_items]
+        products.update({f"laptop_{k}": v for k, v in LaptopClient.get_products(laptop_ids).items()})
+    if clothes_items:
+        clothes_ids = [i["product_id"] for i in clothes_items]
+        products.update({f"clothes_{k}": v for k, v in ClothesClient.get_products(clothes_ids).items()})
+
+    for item in items:
+        key = f"{item['product_type']}_{item['product_id']}"
+        if key not in products:
+            raise ValueError(f"Product not found: {item['product_type']} #{item['product_id']}")
+
+    if laptop_items:
+        stock_items = [{"product_id": i["product_id"], "quantity": i["quantity"]} for i in laptop_items]
+        result = LaptopClient.check_stock(stock_items)
+        if not result["all_in_stock"]:
+            out = [d for d in result["details"] if not d["sufficient"]]
+            raise ValueError(f"Insufficient laptop stock: {out}")
+        LaptopClient.deduct(stock_items)
+
+    if clothes_items:
+        stock_items = [{"product_id": i["product_id"], "quantity": i["quantity"]} for i in clothes_items]
+        result = ClothesClient.check_stock(stock_items)
+        if not result["all_in_stock"]:
+            out = [d for d in result["details"] if not d["sufficient"]]
+            raise ValueError(f"Insufficient clothes stock: {out}")
+        ClothesClient.deduct(stock_items)
 
     total = Decimal("0")
     order_items_data = []
     for item in items:
-        product = products[str(item["product_id"])]
+        key = f"{item['product_type']}_{item['product_id']}"
+        product = products[key]
         unit_price = Decimal(str(product["price"]))
         qty = item["quantity"]
         total += unit_price * qty
         order_items_data.append({
             "product_id": item["product_id"],
+            "product_type": item["product_type"],
             "product_name": product["name"],
             "unit_price": unit_price,
             "quantity": qty,
@@ -48,7 +70,7 @@ def create_order(user_id, items, shipping_address):
 
     with transaction.atomic():
         order = Order.objects.create(
-            user_id=user_id,
+            customer_id=customer_id,
             status=Order.Status.CONFIRMED,
             total_amount=total,
             shipping_address=shipping_address,
@@ -60,14 +82,14 @@ def create_order(user_id, items, shipping_address):
 
 
 def cancel_order(order):
-    """Cancel order and restock items."""
     if order.status == Order.Status.CANCELLED:
         raise ValueError("Order is already cancelled.")
     if order.status in (Order.Status.SHIPPED, Order.Status.DELIVERED):
         raise ValueError("Cannot cancel shipped/delivered order.")
 
     for item in order.items.all():
-        InventoryClient.restock(item.product_id, item.quantity)
+        client = _get_client_for_type(item.product_type)
+        client.restock(item.product_id, item.quantity)
 
     order.status = Order.Status.CANCELLED
     order.save(update_fields=["status", "updated_at"])

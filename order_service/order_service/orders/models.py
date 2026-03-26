@@ -9,7 +9,7 @@ class Order(models.Model):
         DELIVERED = "delivered", "Delivered"
         CANCELLED = "cancelled", "Cancelled"
 
-    user_id = models.PositiveIntegerField(db_index=True)
+    customer_id = models.PositiveIntegerField(db_index=True)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
     total_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     shipping_address = models.TextField()
@@ -21,12 +21,17 @@ class Order(models.Model):
         ordering = ["-created_at"]
 
     def __str__(self):
-        return f"Order#{self.id} user={self.user_id} status={self.status}"
+        return f"Order#{self.id} customer={self.customer_id} status={self.status}"
 
 
 class OrderItem(models.Model):
+    class ProductType(models.TextChoices):
+        LAPTOP = "laptop", "Laptop"
+        CLOTHES = "clothes", "Clothes"
+
     order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name="items")
     product_id = models.PositiveIntegerField()
+    product_type = models.CharField(max_length=20, choices=ProductType.choices)
     product_name = models.CharField(max_length=255)
     unit_price = models.DecimalField(max_digits=12, decimal_places=2)
     quantity = models.PositiveIntegerField()

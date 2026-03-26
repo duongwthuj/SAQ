@@ -1,15 +1,15 @@
 services:
-  # ── Databases ──────────────────────────────────────────────
-  mysql_user:
+  # ── MySQL databases (customer, staff) ─────────────────────
+  mysql_customer:
     image: mysql:8.0
     restart: unless-stopped
     environment:
       MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: user_service_db
+      MYSQL_DATABASE: customer_service_db
     ports:
       - "3307:3306"
     volumes:
-      - mysql_user_data:/var/lib/mysql
+      - mysql_customer_data:/var/lib/mysql
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
       interval: 5s
@@ -18,17 +18,74 @@ services:
     networks:
       - ecommerce_net
 
-  pg_product:
+  mysql_staff:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: staff_service_db
+    ports:
+      - "3308:3306"
+    volumes:
+      - mysql_staff_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - ecommerce_net
+
+  # ── PostgreSQL databases (laptop, clothes, cart, order) ───
+  pg_laptop:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_DB: product_service_db
+      POSTGRES_DB: laptop_service_db
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
     ports:
       - "5433:5432"
     volumes:
-      - pg_product_data:/var/lib/postgresql/data
+      - pg_laptop_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - ecommerce_net
+
+  pg_clothes:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: clothes_service_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5434:5432"
+    volumes:
+      - pg_clothes_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - ecommerce_net
+
+  pg_cart:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: cart_service_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5435:5432"
+    volumes:
+      - pg_cart_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
@@ -45,7 +102,7 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
     ports:
-      - "5434:5432"
+      - "5436:5432"
     volumes:
       - pg_order_data:/var/lib/postgresql/data
     healthcheck:
@@ -56,103 +113,146 @@ services:
     networks:
       - ecommerce_net
 
-  pg_inventory:
-    image: postgres:16-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: inventory_service_db
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-    ports:
-      - "5435:5432"
-    volumes:
-      - pg_inventory_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-    networks:
-      - ecommerce_net
-
-  # ── API Gateway ────────────────────────────────────────────
+  # ── API Gateway ───────────────────────────────────────────
   gateway:
     build: ./gateway
     restart: unless-stopped
     ports:
       - "80:80"
     depends_on:
-      - user_service
-      - product_service
+      - customer_service
+      - staff_service
+      - laptop_service
+      - clothes_service
+      - cart_service
       - order_service
-      - inventory_service
     networks:
       - ecommerce_net
 
-  # ── Services ───────────────────────────────────────────────
-  user_service:
-    build: ./user_service
+  # ── Services ──────────────────────────────────────────────
+  customer_service:
+    build: ./customer_service
     restart: unless-stopped
     ports:
       - "8001:8000"
     environment:
-      DJANGO_SECRET_KEY: user-secret-change-me
+      DJANGO_SECRET_KEY: customer-secret-change-me
       DEBUG: "True"
-      MYSQL_HOST: mysql_user
+      ALLOWED_HOSTS: "*"
+      MYSQL_HOST: mysql_customer
       MYSQL_PORT: "3306"
-      MYSQL_DATABASE: user_service_db
+      MYSQL_DATABASE: customer_service_db
       MYSQL_USER: root
       MYSQL_PASSWORD: root
       INTERNAL_API_KEY: internal-secret-key
     depends_on:
-      mysql_user:
+      mysql_customer:
         condition: service_healthy
     command: >
-      sh -c "python manage.py migrate --noinput && gunicorn user_service.wsgi:application --bind 0.0.0.0:8000 --workers 3"
+      sh -c "python manage.py migrate --noinput &&
+             gunicorn customer_service.wsgi:application --bind 0.0.0.0:8000 --workers 3"
     networks:
       - ecommerce_net
 
-  product_service:
-    build: ./product_service
+  staff_service:
+    build: ./staff_service
     restart: unless-stopped
     ports:
       - "8002:8000"
     environment:
-      DJANGO_SECRET_KEY: product-secret-change-me
+      DJANGO_SECRET_KEY: staff-secret-change-me
       DEBUG: "True"
-      POSTGRES_HOST: pg_product
+      ALLOWED_HOSTS: "*"
+      MYSQL_HOST: mysql_staff
+      MYSQL_PORT: "3306"
+      MYSQL_DATABASE: staff_service_db
+      MYSQL_USER: root
+      MYSQL_PASSWORD: root
+      INTERNAL_API_KEY: internal-secret-key
+    depends_on:
+      mysql_staff:
+        condition: service_healthy
+    command: >
+      sh -c "python manage.py migrate --noinput &&
+             gunicorn staff_service.wsgi:application --bind 0.0.0.0:8000 --workers 3"
+    networks:
+      - ecommerce_net
+
+  laptop_service:
+    build: ./laptop_service
+    restart: unless-stopped
+    ports:
+      - "8003:8000"
+    environment:
+      DJANGO_SECRET_KEY: laptop-secret-change-me
+      DEBUG: "True"
+      ALLOWED_HOSTS: "*"
+      POSTGRES_HOST: pg_laptop
       POSTGRES_PORT: "5432"
-      POSTGRES_DB: product_service_db
+      POSTGRES_DB: laptop_service_db
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       INTERNAL_API_KEY: internal-secret-key
     depends_on:
-      pg_product:
+      pg_laptop:
         condition: service_healthy
     command: >
-      sh -c "python manage.py migrate --noinput && gunicorn product_service.wsgi:application --bind 0.0.0.0:8000 --workers 3"
+      sh -c "python manage.py migrate --noinput &&
+             gunicorn laptop_service.wsgi:application --bind 0.0.0.0:8000 --workers 3"
     networks:
       - ecommerce_net
 
-  inventory_service:
-    build: ./inventory_service
+  clothes_service:
+    build: ./clothes_service
     restart: unless-stopped
     ports:
       - "8004:8000"
     environment:
-      DJANGO_SECRET_KEY: inventory-secret-change-me
+      DJANGO_SECRET_KEY: clothes-secret-change-me
       DEBUG: "True"
-      POSTGRES_HOST: pg_inventory
+      ALLOWED_HOSTS: "*"
+      POSTGRES_HOST: pg_clothes
       POSTGRES_PORT: "5432"
-      POSTGRES_DB: inventory_service_db
+      POSTGRES_DB: clothes_service_db
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       INTERNAL_API_KEY: internal-secret-key
     depends_on:
-      pg_inventory:
+      pg_clothes:
         condition: service_healthy
     command: >
-      sh -c "python manage.py migrate --noinput && gunicorn inventory_service.wsgi:application --bind 0.0.0.0:8000 --workers 3"
+      sh -c "python manage.py migrate --noinput &&
+             gunicorn clothes_service.wsgi:application --bind 0.0.0.0:8000 --workers 3"
+    networks:
+      - ecommerce_net
+
+  cart_service:
+    build: ./cart_service
+    restart: unless-stopped
+    ports:
+      - "8005:8000"
+    environment:
+      DJANGO_SECRET_KEY: cart-secret-change-me
+      DEBUG: "True"
+      ALLOWED_HOSTS: "*"
+      POSTGRES_HOST: pg_cart
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: cart_service_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      INTERNAL_API_KEY: internal-secret-key
+      LAPTOP_SERVICE_URL: http://laptop_service:8000
+      CLOTHES_SERVICE_URL: http://clothes_service:8000
+    depends_on:
+      pg_cart:
+        condition: service_healthy
+      laptop_service:
+        condition: service_started
+      clothes_service:
+        condition: service_started
+    command: >
+      sh -c "python manage.py migrate --noinput &&
+             gunicorn cart_service.wsgi:application --bind 0.0.0.0:8000 --workers 3"
     networks:
       - ecommerce_net
 
@@ -160,38 +260,45 @@ services:
     build: ./order_service
     restart: unless-stopped
     ports:
-      - "8003:8000"
+      - "8006:8000"
     environment:
       DJANGO_SECRET_KEY: order-secret-change-me
       DEBUG: "True"
+      ALLOWED_HOSTS: "*"
       POSTGRES_HOST: pg_order
       POSTGRES_PORT: "5432"
       POSTGRES_DB: order_service_db
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       INTERNAL_API_KEY: internal-secret-key
-      USER_SERVICE_URL: http://user_service:8000
-      PRODUCT_SERVICE_URL: http://product_service:8000
-      INVENTORY_SERVICE_URL: http://inventory_service:8000
+      CUSTOMER_SERVICE_URL: http://customer_service:8000
+      LAPTOP_SERVICE_URL: http://laptop_service:8000
+      CLOTHES_SERVICE_URL: http://clothes_service:8000
+      CART_SERVICE_URL: http://cart_service:8000
     depends_on:
       pg_order:
         condition: service_healthy
-      user_service:
+      customer_service:
         condition: service_started
-      product_service:
+      laptop_service:
         condition: service_started
-      inventory_service:
+      clothes_service:
+        condition: service_started
+      cart_service:
         condition: service_started
     command: >
-      sh -c "python manage.py migrate --noinput && gunicorn order_service.wsgi:application --bind 0.0.0.0:8000 --workers 3"
+      sh -c "python manage.py migrate --noinput &&
+             gunicorn order_service.wsgi:application --bind 0.0.0.0:8000 --workers 3"
     networks:
       - ecommerce_net
 
 volumes:
-  mysql_user_data:
-  pg_product_data:
+  mysql_customer_data:
+  mysql_staff_data:
+  pg_laptop_data:
+  pg_clothes_data:
+  pg_cart_data:
   pg_order_data:
-  pg_inventory_data:
 
 networks:
   ecommerce_net:

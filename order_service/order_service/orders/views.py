@@ -20,9 +20,9 @@ class OrderListCreateView(generics.ListAPIView):
 
     def get_queryset(self):
         qs = Order.objects.all()
-        user_id = self.request.query_params.get("user_id")
-        if user_id:
-            qs = qs.filter(user_id=user_id)
+        customer_id = self.request.query_params.get("customer_id")
+        if customer_id:
+            qs = qs.filter(customer_id=customer_id)
         return qs
 
     def post(self, request):
@@ -30,7 +30,7 @@ class OrderListCreateView(generics.ListAPIView):
         serializer.is_valid(raise_exception=True)
         try:
             order = services.create_order(
-                user_id=serializer.validated_data["user_id"],
+                customer_id=serializer.validated_data["customer_id"],
                 items=serializer.validated_data["items"],
                 shipping_address=serializer.validated_data["shipping_address"],
             )
