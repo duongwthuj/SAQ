@@ -1,5 +1,6 @@
 services:
-  db:
+  # ── Databases ──────────────────────────────────────────────
+  mysql_user:
     image: mysql:8.0
     restart: unless-stopped
     environment:
@@ -8,31 +9,190 @@ services:
     ports:
       - "3307:3306"
     volumes:
-      - mysql_data:/var/lib/mysql
+      - mysql_user_data:/var/lib/mysql
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
       interval: 5s
       timeout: 3s
       retries: 10
+    networks:
+      - ecommerce_net
 
-  web:
-    build: .
+  pg_product:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: product_service_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5433:5432"
+    volumes:
+      - pg_product_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - ecommerce_net
+
+  pg_order:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: order_service_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5434:5432"
+    volumes:
+      - pg_order_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - ecommerce_net
+
+  pg_inventory:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: inventory_service_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5435:5432"
+    volumes:
+      - pg_inventory_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - ecommerce_net
+
+  # ── API Gateway ────────────────────────────────────────────
+  gateway:
+    build: ./gateway
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "80:80"
+    depends_on:
+      - user_service
+      - product_service
+      - order_service
+      - inventory_service
+    networks:
+      - ecommerce_net
+
+  # ── Services ───────────────────────────────────────────────
+  user_service:
+    build: ./user_service
+    restart: unless-stopped
+    ports:
+      - "8001:8000"
     environment:
-      DJANGO_SECRET_KEY: change-me-in-production
+      DJANGO_SECRET_KEY: user-secret-change-me
       DEBUG: "True"
-      MYSQL_HOST: db
+      MYSQL_HOST: mysql_user
       MYSQL_PORT: "3306"
       MYSQL_DATABASE: user_service_db
       MYSQL_USER: root
       MYSQL_PASSWORD: root
+      INTERNAL_API_KEY: internal-secret-key
     depends_on:
-      db:
+      mysql_user:
         condition: service_healthy
     command: >
-      sh -c "python manage.py migrate && gunicorn user_service.wsgi:application --bind 0.0.0.0:8000 --workers 3"
+      sh -c "python manage.py migrate --noinput && gunicorn user_service.wsgi:application --bind 0.0.0.0:8000 --workers 3"
+    networks:
+      - ecommerce_net
+
+  product_service:
+    build: ./product_service
+    restart: unless-stopped
+    ports:
+      - "8002:8000"
+    environment:
+      DJANGO_SECRET_KEY: product-secret-change-me
+      DEBUG: "True"
+      POSTGRES_HOST: pg_product
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: product_service_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      INTERNAL_API_KEY: internal-secret-key
+    depends_on:
+      pg_product:
+        condition: service_healthy
+    command: >
+      sh -c "python manage.py migrate --noinput && gunicorn product_service.wsgi:application --bind 0.0.0.0:8000 --workers 3"
+    networks:
+      - ecommerce_net
+
+  inventory_service:
+    build: ./inventory_service
+    restart: unless-stopped
+    ports:
+      - "8004:8000"
+    environment:
+      DJANGO_SECRET_KEY: inventory-secret-change-me
+      DEBUG: "True"
+      POSTGRES_HOST: pg_inventory
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: inventory_service_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      INTERNAL_API_KEY: internal-secret-key
+    depends_on:
+      pg_inventory:
+        condition: service_healthy
+    command: >
+      sh -c "python manage.py migrate --noinput && gunicorn inventory_service.wsgi:application --bind 0.0.0.0:8000 --workers 3"
+    networks:
+      - ecommerce_net
+
+  order_service:
+    build: ./order_service
+    restart: unless-stopped
+    ports:
+      - "8003:8000"
+    environment:
+      DJANGO_SECRET_KEY: order-secret-change-me
+      DEBUG: "True"
+      POSTGRES_HOST: pg_order
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: order_service_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      INTERNAL_API_KEY: internal-secret-key
+      USER_SERVICE_URL: http://user_service:8000
+      PRODUCT_SERVICE_URL: http://product_service:8000
+      INVENTORY_SERVICE_URL: http://inventory_service:8000
+    depends_on:
+      pg_order:
+        condition: service_healthy
+      user_service:
+        condition: service_started
+      product_service:
+        condition: service_started
+      inventory_service:
+        condition: service_started
+    command: >
+      sh -c "python manage.py migrate --noinput && gunicorn order_service.wsgi:application --bind 0.0.0.0:8000 --workers 3"
+    networks:
+      - ecommerce_net
 
 volumes:
-  mysql_data:
+  mysql_user_data:
+  pg_product_data:
+  pg_order_data:
+  pg_inventory_data:
+
+networks:
+  ecommerce_net:
+    driver: bridge
